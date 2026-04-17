@@ -42,7 +42,7 @@ To send data to the console, you need a small "bridge" script:
 1. Open your Google Form.  
 2. Click the three dots (⋮) in the top right and select **Script editor**.  
 3. Delete any code there and paste the following:
-
+<pre>
 function doGet() {  
   const form \= FormApp.getActiveForm();  
   const responses \= form.getResponses();  
@@ -80,7 +80,7 @@ function doGet() {
   return ContentService.createTextOutput(JSON.stringify(questionsData))  
     .setMimeType(ContentService.MimeType.JSON);  
 }
-
+</pre>
 4. Click **Deploy** \> **New Deployment**.  
 5. Select type: **Web App**.  
 6. Set "Who has access" to **Anyone**.  
