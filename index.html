@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PollParty Console</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap');
+        :root { --brand-primary: #004c9b; --brand-secondary: #ffdc00; }
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #f1f5f9; color: #0f172a; overflow: hidden; margin: 0; }
+        .brand-gradient { background: linear-gradient(135deg, var(--brand-primary) 0%, #002d5c 100%); }
+        
+        #main-wrapper { height: 100vh; display: flex; flex-direction: column; }
+        #content-area { flex: 1; display: flex; overflow: hidden; position: relative; }
+        
+        #sidebar { width: 340px; transition: all 0.3s ease; z-index: 40; flex-shrink: 0; }
+        #sidebar.collapsed { margin-left: -340px; opacity: 0; visibility: hidden; }
+        
+        .chart-container { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 1.25rem; }
+
+        body.faux-fullscreen nav { display: none; }
+        body.faux-fullscreen #sidebar { display: none; }
+        
+        #exit-container { display: none; position: fixed; top: 20px; right: 20px; z-index: 100; }
+        body.faux-fullscreen #exit-container { display: flex; }
+
+        .bubble-node, .word-node { transition: transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1); }
+        .bubble-circle { transition: r 0.4s ease-out; }
+        
+        #viz-wrapper { position: relative; width: 100%; height: 100%; background: white; border-radius: 1rem; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+        .viz-layer { width: 100% !important; height: 100% !important; }
+
+        .viz-select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2364748b'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 1rem center; background-size: 1.25rem; }
+
+        .switch { position: relative; display: inline-block; width: 44px; height: 24px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #cbd5e1; transition: .4s; border-radius: 24px; }
+        .slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
+        input:checked + .slider { background-color: var(--brand-primary); }
+        input:checked + .slider:before { transform: translateX(20px); }
+    </style>
+</head>
+<body class="antialiased">
+
+    <div id="main-wrapper">
+        <nav id="topNav" class="brand-gradient text-white px-6 py-3 shadow-2xl z-50 flex justify-between items-center">
+            <div class="flex items-center gap-3">
+                <button onclick="toggleSidebar()" class="p-2 hover:bg-white/10 rounded-lg transition">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" /></svg>
+                </button>
+                <h1 class="font-extrabold text-lg tracking-tight">PollParty <span class="font-normal opacity-60 text-sm">Console</span></h1>
+            </div>
+            
+            <div class="flex items-center gap-4">
+                <div class="flex items-center gap-2 bg-black/20 px-3 py-1.5 rounded-full">
+                    <div id="statusDot" class="h-2.5 w-2.5 rounded-full bg-slate-400"></div>
+                    <span id="statusText" class="text-[10px] font-bold uppercase tracking-widest opacity-80">Idle</span>
+                </div>
+                <button onclick="toggleFauxFullscreen(true)" class="bg-white text-[#004c9b] hover:bg-[#ffdc00] px-4 py-2 rounded-lg font-bold text-xs uppercase tracking-wider transition shadow-lg">
+                    Start Presentation
+                </button>
+            </div>
+        </nav>
+
+        <div id="content-area">
+            <aside id="sidebar" class="bg-white border-r border-slate-200 flex flex-col shadow-xl overflow-hidden">
+                <div class="p-6 overflow-y-auto flex-1" id="sidebar-controls"></div>
+                <div class="p-4 bg-slate-50 border-t border-slate-100">
+                    <p class="text-[9px] text-slate-400 font-bold uppercase text-center">Open Source Edition • v1.0</p>
+                </div>
+            </aside>
+
+            <main class="chart-container">
+                <div class="flex flex-col lg:flex-row gap-6 flex-1 overflow-hidden">
+                    <div class="flex-[3] bg-white p-6 rounded-[2rem] shadow-sm border border-slate-200 flex flex-col min-h-0 relative">
+                        <div class="flex justify-between items-center mb-6">
+                            <div>
+                                <h2 id="qTitle" class="text-2xl font-black text-slate-800 tracking-tight">Loading Question...</h2>
+                                <p class="text-[11px] font-bold text-slate-400 uppercase tracking-widest mt-1">
+                                    Slide <span id="currentFormIdxDisplay">0</span> of <span id="totalActiveForms">0</span> • 
+                                    <span id="responseCount" class="text-[#004c9b]">0</span> Responses
+                                </p>
+                            </div>
+                            <div class="flex items-center gap-2 bg-slate-50 p-1.5 rounded-2xl">
+                                <button onclick="changeForm(-1)" class="p-3 bg-white hover:bg-slate-100 rounded-xl shadow-sm transition">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" /></svg>
+                                </button>
+                                <button onclick="changeForm(1)" class="px-6 py-3 bg-[#004c9b] text-white rounded-xl font-bold text-sm shadow-lg transition">
+                                    Next Slide
+                                </button>
+                            </div>
+                        </div>
+
+                        <div id="viz-wrapper" class="flex-1 min-h-0 relative"></div>
+
+                        <div id="noData" class="absolute inset-0 flex items-center justify-center bg-white/80 z-20 hidden backdrop-blur-sm rounded-[2rem]">
+                            <div class="text-center">
+                                <div class="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002 2h2a2 2 0 002-2m0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
+                                </div>
+                                <p class="font-bold text-slate-400 uppercase text-xs tracking-widest">Awaiting Participation</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flex-1 bg-white p-8 rounded-[2rem] border border-slate-200 shadow-sm flex flex-col items-center justify-center text-center">
+                        <div id="qrcode" class="p-4 bg-white border-4 border-[#ffdc00] rounded-[2rem] shadow-inner mb-6"></div>
+                        <h3 class="text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-2">Scan to Join</h3>
+                        <p id="qrQuestionLabel" class="text-lg font-extrabold text-slate-800">No Active Question</p>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <div id="exit-container">
+        <button onclick="toggleFauxFullscreen(false)" class="bg-slate-800/80 backdrop-blur-md text-white px-6 py-3 rounded-full shadow-2xl hover:bg-black transition text-xs font-bold uppercase tracking-widest flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+            Exit Show
+        </button>
+    </div>
+
+    <script>
+        /**
+         * POLLPARTY CONFIGURATION
+         * Users simply edit this array to add their own questions.
+         */
+        const POLL_CONFIG = [
+            { 
+                id: 1, 
+                script: "REPLACE_WITH_YOUR_APPS_SCRIPT_URL_1", 
+                form: "REPLACE_WITH_YOUR_VIEW_FORM_URL_1", 
+                edit: "REPLACE_WITH_YOUR_EDIT_FORM_URL_1" 
+            },
+            // Add more objects here as needed
+        ];
+
+        // Global State
+        let currentChart = null;
+        let currentLocalIndex = 0;
+        let activeVizType = null;
+        let visualSettings = POLL_CONFIG.reduce((acc, q) => { acc[q.id] = 'bar'; return acc; }, {});
+        let activeStates = POLL_CONFIG.reduce((acc, q) => { acc[q.id] = true; return acc; }, {});
+        let qrGenerator = null;
+        const VIZ_ICONS = { bar: '📊', pie: '🍕', radar: '🕸️', bubble: '🫧', word: '☁️' };
+
+        Chart.register(ChartDataLabels);
+
+        window.onload = () => {
+            qrGenerator = new QRCode(document.getElementById("qrcode"), { 
+                width: 200, height: 200, colorDark : "#004c9b", correctLevel : QRCode.CorrectLevel.H
+            });
+
+            if (POLL_CONFIG.length === 0 || POLL_CONFIG[0].script.includes("REPLACE_WITH")) {
+                showConfigWarning();
+            } else {
+                renderSidebar();
+                refreshLiveView();
+                setInterval(syncData, 3000);
+            }
+        };
+
+        function showConfigWarning() {
+            document.getElementById('qTitle').innerText = "Configuration Required";
+            document.getElementById('viz-wrapper').innerHTML = `
+                <div class="max-w-md text-center p-8">
+                    <p class="text-slate-600 mb-4">It looks like you haven't linked your Google Forms yet.</p>
+                    <p class="text-sm text-slate-400">Please edit the <code>POLL_CONFIG</code> variable at the top of the script tag in <code>index.html</code>.</p>
+                </div>
+            `;
+        }
+
+        function renderSidebar() {
+            const container = document.getElementById('sidebar-controls');
+            container.innerHTML = `<h2 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6">Poll Setup</h2>` + 
+            POLL_CONFIG.map(q => `
+                <div class="p-4 bg-slate-50 rounded-2xl border border-slate-200 mb-4 transition-all ${!activeStates[q.id] ? 'opacity-50 grayscale-[0.5]' : ''}">
+                    <div class="flex justify-between items-center mb-4">
+                        <div class="flex items-center gap-3">
+                            <label class="switch">
+                                <input type="checkbox" ${activeStates[q.id] ? 'checked' : ''} onchange="toggleQuestionActive(${q.id})">
+                                <span class="slider"></span>
+                            </label>
+                            <p class="font-extrabold text-sm text-slate-700">Question ${q.id}</p>
+                        </div>
+                        <a href="${q.edit}" target="_blank" class="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 hover:bg-[#004c9b] hover:text-white rounded-lg transition text-[10px] font-bold text-slate-500">
+                            EDIT
+                        </a>
+                    </div>
+                    <select onchange="updateVisualType(${q.id}, this.value)" class="viz-select w-full text-[11px] font-black uppercase tracking-wider p-3 rounded-xl border border-slate-200 bg-white focus:ring-2 focus:ring-[#004c9b] outline-none shadow-sm">
+                        <option value="bar" ${visualSettings[q.id] === 'bar' ? 'selected' : ''}>${VIZ_ICONS.bar} Bar Chart</option>
+                        <option value="pie" ${visualSettings[q.id] === 'pie' ? 'selected' : ''}>${VIZ_ICONS.pie} Pie Chart</option>
+                        <option value="radar" ${visualSettings[q.id] === 'radar' ? 'selected' : ''}>${VIZ_ICONS.radar} Radar Chart</option>
+                        <option value="bubble" ${visualSettings[q.id] === 'bubble' ? 'selected' : ''}>${VIZ_ICONS.bubble} Bubble Cloud</option>
+                        <option value="word" ${visualSettings[q.id] === 'word' ? 'selected' : ''}>${VIZ_ICONS.word} Word Cloud</option>
+                    </select>
+                </div>
+            `).join('');
+        }
+
+        function toggleQuestionActive(id) {
+            activeStates[id] = !activeStates[id];
+            renderSidebar();
+            refreshLiveView();
+        }
+
+        function updateVisualType(id, val) { 
+            visualSettings[id] = val; 
+            refreshLiveView(); 
+        }
+
+        function toggleSidebar() { document.getElementById('sidebar').classList.toggle('collapsed'); }
+        function toggleFauxFullscreen(v) { document.body.classList.toggle('faux-fullscreen', v); }
+
+        function changeForm(dir) {
+            const activeIndices = POLL_CONFIG.map((q, i) => activeStates[q.id] ? i : -1).filter(i => i !== -1);
+            if (activeIndices.length === 0) return;
+            const currentActiveRelIdx = activeIndices.indexOf(currentLocalIndex);
+            let nextActiveRelIdx = (currentActiveRelIdx + dir + activeIndices.length) % activeIndices.length;
+            currentLocalIndex = activeIndices[nextActiveRelIdx];
+            refreshLiveView();
+        }
+
+        function refreshLiveView() {
+            const activeIndices = POLL_CONFIG.map((q, i) => activeStates[q.id] ? i : -1).filter(i => i !== -1);
+            const active = POLL_CONFIG[currentLocalIndex];
+            const vType = (active && activeStates[active.id]) ? visualSettings[active.id] : null;
+
+            if (activeVizType !== vType) {
+                const wrapper = document.getElementById('viz-wrapper');
+                if (currentChart) { currentChart.destroy(); currentChart = null; }
+                wrapper.innerHTML = '';
+                
+                if (vType) {
+                    if (vType === 'bubble' || vType === 'word') {
+                        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+                        svg.id = "active-viz-element";
+                        svg.setAttribute("class", "viz-layer");
+                        svg.setAttribute("viewBox", "0 0 800 500");
+                        wrapper.appendChild(svg);
+                    } else {
+                        const canvas = document.createElement("canvas");
+                        canvas.id = "active-viz-element";
+                        canvas.setAttribute("class", "viz-layer");
+                        wrapper.appendChild(canvas);
+                    }
+                }
+                activeVizType = vType;
+            }
+
+            if (!active || !activeStates[active.id]) {
+                document.getElementById('qTitle').innerText = "Session Paused";
+                document.getElementById('viz-wrapper').innerHTML = `<div class="text-center p-12"><p class="text-slate-400 font-bold uppercase tracking-widest text-sm">Select an active question in the sidebar</p></div>`;
+                return;
+            }
+
+            qrGenerator.clear();
+            qrGenerator.makeCode(active.form);
+            document.getElementById('qrQuestionLabel').innerText = `Question ${active.id}`;
+            
+            const currentDisplayIdx = activeIndices.indexOf(currentLocalIndex) + 1;
+            document.getElementById('currentFormIdxDisplay').innerText = currentDisplayIdx || 0;
+            document.getElementById('totalActiveForms').innerText = activeIndices.length;
+            
+            syncData();
+        }
+
+        async function syncData() {
+            const active = POLL_CONFIG[currentLocalIndex];
+            if (!active || !activeStates[active.id] || active.script.includes("REPLACE")) return;
+            try {
+                const res = await fetch(active.script);
+                const data = await res.json();
+                const q = Array.isArray(data) ? data[0] : data;
+                renderUpdate(q, visualSettings[active.id]);
+                document.getElementById('statusDot').className = 'h-2.5 w-2.5 rounded-full bg-green-500';
+                document.getElementById('statusText').innerText = "Live";
+            } catch (e) {
+                document.getElementById('statusDot').className = 'h-2.5 w-2.5 rounded-full bg-red-400';
+                document.getElementById('statusText').innerText = "Sync Error";
+            }
+        }
+
+        function renderUpdate(q, type) {
+            const results = q.results || {};
+            const labels = Object.keys(results);
+            const values = Object.values(results);
+            const total = values.reduce((a, b) => a + b, 0);
+            
+            document.getElementById('qTitle').innerText = q.title || "Untitled Poll";
+            document.getElementById('responseCount').innerText = total;
+            document.getElementById('noData').classList.toggle('hidden', total > 0);
+
+            if (type === 'bubble') updateBubbleCloud(labels, values);
+            else if (type === 'word') updateWordCloud(labels, values);
+            else updateChartJs(labels, values, type);
+        }
+
+        function updateChartJs(labels, values, type) {
+            const el = document.getElementById('active-viz-element');
+            if (!el || el.tagName !== 'CANVAS') return;
+            const ctx = el.getContext('2d');
+            const legendLabels = type === 'pie' ? labels.map((l, i) => `${l} (${values[i]})`) : labels;
+
+            if (currentChart) {
+                currentChart.data.labels = legendLabels;
+                currentChart.data.datasets[0].data = values;
+                currentChart.update('none');
+            } else {
+                currentChart = new Chart(ctx, {
+                    type: type,
+                    data: {
+                        labels: legendLabels,
+                        datasets: [{
+                            label: 'Responses',
+                            data: values,
+                            backgroundColor: (type === 'pie' || type === 'radar')
+                                ? ['rgba(0, 76, 155, 0.7)', 'rgba(255, 220, 0, 0.7)', 'rgba(0, 45, 92, 0.7)', 'rgba(100, 116, 139, 0.7)', 'rgba(100, 100, 100, 0.7)'] 
+                                : '#004c9b',
+                            borderColor: (type === 'radar') ? '#004c9b' : '#ffffff',
+                            borderRadius: type === 'bar' ? 12 : 0,
+                            borderWidth: (type === 'bar') ? 0 : 2,
+                            fill: type === 'radar'
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        animation: { duration: 600 },
+                        plugins: { 
+                            legend: { display: (type === 'pie' || type === 'radar'), position: 'bottom' },
+                            datalabels: {
+                                color: type === 'pie' ? '#fff' : '#004c9b',
+                                anchor: type === 'pie' ? 'center' : 'end',
+                                align: type === 'pie' ? 'center' : 'top',
+                                formatter: v => v > 0 ? v : '',
+                                font: { weight: 'bold', size: 14 }
+                            }
+                        },
+                        scales: type === 'bar' ? { y: { beginAtZero: true } } : {}
+                    }
+                });
+            }
+        }
+
+        function updateBubbleCloud(labels, values) {
+            const svgEl = document.getElementById('active-viz-element');
+            if (!svgEl || svgEl.tagName.toLowerCase() !== 'svg') return;
+            const svg = d3.select(svgEl);
+            const width = 800, height = 500;
+            const data = { children: labels.map((label, i) => ({ name: label, value: Math.max(values[i], 0.1) })) };
+            
+            const root = d3.hierarchy(data).sum(d => d.value);
+            d3.pack().size([width - 40, height - 40]).padding(10)(root);
+            const nodes = root.leaves();
+
+            svg.selectAll('.word-node').remove();
+
+            const join = svg.selectAll(".bubble-node")
+                .data(nodes, d => d.data.name);
+
+            join.exit().remove();
+
+            const enter = join.enter().append("g")
+                .attr("class", "bubble-node")
+                .attr("data-bubble-id", d => d.data.name);
+
+            enter.append("circle").attr("class", "bubble-circle")
+                .attr("fill", "#004c9b").attr("stroke", "#ffdc00").attr("stroke-width", 4);
+            enter.append("text").attr("class", "l").attr("text-anchor", "middle").attr("fill", "white").attr("font-weight", "800");
+            enter.append("text").attr("class", "v").attr("text-anchor", "middle").attr("fill", "#ffdc00").attr("font-weight", "900");
+
+            const update = enter.merge(join);
+            update.transition().duration(600)
+                .attr("transform", d => `translate(${d.x + 20}, ${d.y + 20})`);
+
+            update.select("circle").transition().duration(600).attr("r", d => d.r);
+            update.select(".l").attr("y", -4).attr("font-size", d => Math.max(8, d.r/4)).text(d => d.data.name.toUpperCase()).style("opacity", d => d.r > 20 ? 1 : 0);
+            update.select(".v").attr("y", d => d.r/3).attr("font-size", d => Math.max(12, d.r/2.2)).text(d => Math.floor(d.data.value)).style("opacity", d => d.r > 20 ? 1 : 0);
+        }
+
+        function updateWordCloud(labels, values) {
+            const svgEl = document.getElementById('active-viz-element');
+            if (!svgEl || svgEl.tagName.toLowerCase() !== 'svg') return;
+            const svg = d3.select(svgEl);
+            const width = 800, height = 500;
+            const centerX = width/2, centerY = height/2;
+            const maxVal = Math.max(...values, 1);
+            const scale = d3.scaleLinear().domain([0, maxVal]).range([20, 80]);
+
+            svg.selectAll('.bubble-node').remove();
+
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            const placedRects = [];
+            const padding = 6;
+
+            const items = labels.map((l, i) => ({ label: l, val: values[i], index: i }))
+                               .sort((a, b) => b.val - a.val);
+
+            const finalData = items.map(item => {
+                const fontSize = scale(item.val);
+                ctx.font = `900 ${fontSize}px "Plus Jakarta Sans"`;
+                const textWidth = ctx.measureText(item.label.toUpperCase()).width;
+                const textHeight = fontSize * 0.8;
+                let angle = 0, radius = 0, found = false, tx, ty;
+
+                while (!found && radius < 500) {
+                    tx = centerX + radius * Math.cos(angle) - textWidth/2;
+                    ty = centerY + radius * Math.sin(angle) - textHeight/2;
+                    const rect = { x1: tx, y1: ty, x2: tx + textWidth, y2: ty + textHeight };
+                    let overlap = placedRects.some(r => !(rect.x2 + padding < r.x1 || rect.x1 - padding > r.x2 || rect.y2 + padding < r.y1 || rect.y1 - padding > r.y2));
+                    if (!overlap) { found = true; placedRects.push(rect); }
+                    else { angle += 0.2; radius += 0.5; }
+                }
+                return { ...item, tx: tx + textWidth/2, ty: ty + textHeight/2, fontSize };
+            }).filter(d => d.tx !== undefined);
+
+            const join = svg.selectAll(".word-node").data(finalData, d => d.label);
+            join.exit().remove();
+
+            const enter = join.enter().append("g").attr("class", "word-node");
+            enter.append("text").attr("text-anchor", "middle").attr("font-weight", "900");
+
+            const update = enter.merge(join);
+            update.transition().duration(600).attr("transform", d => `translate(${d.tx}, ${d.ty})`);
+            update.select("text")
+                .text(d => d.label.toUpperCase())
+                .attr("font-size", d => d.fontSize)
+                .attr("fill", (d, i) => ['#004c9b', '#002d5c', '#64748b'][i % 3]);
+        }
+    </script>
+</body>
+</html>
