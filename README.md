@@ -97,4 +97,4 @@ function doGet() {
 
 ## **📄 License**
 
-This project is open-source and available under the [GNU GPLv3 License](https://www.gnu.org/licenses/gpl-3.0).
+This project is open-source and available under the AGPL-3.0 license.
